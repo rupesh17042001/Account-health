@@ -1,0 +1,150 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ─── Models ──────────────────────────────────────────────────────────
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  name           String?
+  password       String?      // hashed, null if OAuth-only
+  image          String?
+  role           String       @default("MEMBER") // ADMIN or MEMBER
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  users     User[]
+  brands    Brand[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Brand {
+  id                String              @id @default(cuid())
+  name              String
+  sellerId          String?             // Amazon Seller ID
+  color             String              // hex color, auto-assigned
+  avatar            String              // 2-char initials
+  organizationId    String
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  shareToken        String?             @unique  // signed JWT for client link
+  shareEnabled      Boolean             @default(false)
+  snapshots         HealthSnapshot[]
+  sales             SalesAndTraffic[]
+  inventory         Inventory[]
+  
+  // SP-API Credentials
+  spApiRefreshToken String?
+  spApiClientId     String?
+  spApiClientSecret String?
+  awsRegion         String?             @default("eu-west-1")
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([organizationId])
+}
+
+model HealthSnapshot {
+  id               String              @id @default(cuid())
+  brandId          String
+  brand            Brand               @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  reportDate       DateTime
+  healthScore      Int                 // 0–1000 (Amazon) or 0–100 (simplified)
+  odr              Float               // Order Defect Rate %
+  ldr              Float               // Late Dispatch Rate %
+  cancellationRate Float               // Cancellation Rate %
+  notes            String?
+  isInternalNote   Boolean             @default(false)
+  violations       Violation[]
+  suppressed       SuppressedListing[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([brandId])
+  @@index([reportDate])
+}
+
+model Violation {
+  id         String         @id @default(cuid())
+  snapshotId String
+  snapshot   HealthSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  issue      String
+  severity   String         // HIGH, MEDIUM, LOW
+  status     String?        // internal tracking status
+
+  @@index([snapshotId])
+}
+
+model SuppressedListing {
+  id         String         @id @default(cuid())
+  snapshotId String
+  snapshot   HealthSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  asin       String?
+  title      String?
+  reason     String?
+
+  @@index([snapshotId])
+}
+
+// ─── Automated SP-API Data Models ────────────────────────────────────
+
+model SalesAndTraffic {
+  id                  String   @id @default(cuid())
+  brandId             String
+  brand               Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  date                DateTime
+  orderedProductSales Float    // Total revenue
+  unitsOrdered        Int
+  totalOrderItems     Int
+  sessions            Int
+  pageViews           Int
+  buyBoxPercentage    Float
+  conversionRate      Float
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([brandId, date]) // Ensures idempotency (1 record per brand per day)
+  @@index([brandId])
+  @@index([date])
+}
+
+model Inventory {
+  id                  String   @id @default(cuid())
+  brandId             String
+  brand               Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  sku                 String
+  asin                String
+  title               String?
+  fulfillableQuantity Int
+  inboundQuantity     Int
+  reservedQuantity    Int
+  unfulfillableQuantity Int
+  snapshotDate        DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([brandId, sku, snapshotDate]) // Idempotency
+  @@index([brandId])
+  @@index([sku])
+  @@index([snapshotDate])
+}
